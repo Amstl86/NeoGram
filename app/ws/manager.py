@@ -58,7 +58,7 @@ async def handle_send_message(
     db: AsyncSession,
     redis
 ):
-    # 🔒 1. валидация
+    # валидация
     chat_id_raw = data.get("chat_id")
     text = data.get("text")
 
@@ -74,7 +74,7 @@ async def handle_send_message(
     except ValueError:
         return
 
-    # ⚡ 2. membership через Redis (без БД)
+    # membership через Redis (без БД)
     is_member = await redis.sismember(
         f"chat:{chat_id}:members",
         str(user_id)
@@ -83,10 +83,10 @@ async def handle_send_message(
     if not is_member:
         return
 
-    # ⚡ 3. seq генерация
+    # seq генерация
     seq = await redis.incr(f"chat:{chat_id}:seq")
 
-    # 💾 4. сохраняем
+    # сохраняем
     msg = Message(
         chat_id=chat_id,
         user_id=user_id,
@@ -98,7 +98,7 @@ async def handle_send_message(
     await db.flush()   # лучше чем сразу commit
     await db.commit()
 
-    # 📡 5. payload
+
     payload = {
         "type": "new_message",
         "chat_id": str(chat_id),
@@ -107,7 +107,7 @@ async def handle_send_message(
         "text": text,
     }
 
-    # 🚀 6. publish
+
     await redis.publish(
         f"chat:{chat_id}",
         json.dumps(payload)
@@ -130,7 +130,7 @@ async def handle_ack(
     except ValueError:
         return
 
-    # 🔒 membership
+    # membership
     result = await db.execute(
         select(ChatMember).where(
             ChatMember.chat_id == chat_id,
@@ -142,7 +142,7 @@ async def handle_ack(
     if not member:
         return
 
-    # 📈 обновляем delivered
+    # обновляем delivered
     if seq > member.last_delivered_seq:
         member.last_delivered_seq = seq
         await db.commit()
@@ -159,6 +159,8 @@ async def handle_ack(
             f"chat:{chat_id}",
             json.dumps(payload)
         )
+
+
 
 async def redis_listener(db: AsyncSession, redis):
     pubsub = redis.pubsub()

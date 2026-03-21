@@ -75,9 +75,9 @@ class Chat(Base):
 class ChatMember(Base):
     __tablename__ = "chat_members"
     __table_args__ = (
-        UniqueConstraint("user_id", "chat_id"),
+        UniqueConstraint("chat_id", "user_id"),
+        Index("ix_chat_members_chat_user", "chat_id", "user_id"),
         Index("ix_chat_members_user", "user_id"),
-        Index("ix_chat_members_chat", "chat_id"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -88,21 +88,30 @@ class ChatMember(Base):
 
     user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("users.id")
+        ForeignKey("users.id"),
+        nullable=False
     )
 
     role: Mapped[str] = mapped_column(
         String,
-        default="member"  # owner | admin | member
+        default="member"
     )
 
     chat_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("chats.id")
+        ForeignKey("chats.id"),
+        nullable=False
     )
 
-    last_read_seq: Mapped[int] = mapped_column(default=0)
-    last_delivered_seq: Mapped[int] = mapped_column(default=0)
+    last_read_seq: Mapped[int] = mapped_column(
+        default=0,
+        nullable=False
+    )
+
+    last_delivered_seq: Mapped[int] = mapped_column(
+        default=0,
+        nullable=False
+    )
 
     chat: Mapped["Chat"] = relationship(
         back_populates="members"
