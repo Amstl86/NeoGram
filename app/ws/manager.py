@@ -1,5 +1,7 @@
 import json
 import uuid
+import asyncio
+import time
 from collections import defaultdict
 from typing import Dict, Set
 
@@ -19,6 +21,9 @@ async def connect(ws: WebSocket, user_id: uuid.UUID):
     connections_by_user[user_id].add(ws)
 
 async def disconnect(ws: WebSocket, user_id: uuid.UUID):
+    if user_id not in connections_by_user:
+        return
+
     connections_by_user[user_id].discard(ws)
 
     if not connections_by_user[user_id]:
@@ -106,7 +111,6 @@ async def handle_send_message(
     await db.flush()   # лучше чем сразу commit
     await db.commit()
 
-
     payload = {
         "type": "new_message",
         "chat_id": str(chat_id),
@@ -115,7 +119,17 @@ async def handle_send_message(
         "text": text,
     }
 
+    # 👥 получаем участников
+    members = await get_chat_members(chat_id, db, redis)
 
+    # добавляем в pending ДО отправки
+    for member_id in members:
+        await redis.zadd(
+            f"pending:{member_id}",
+            {json.dumps(payload): seq}
+        )
+
+    # pub/sub
     await redis.publish(
         f"chat:{chat_id}",
         json.dumps(payload)
@@ -142,7 +156,7 @@ async def handle_state_update(
     values = {}
     returning_fields = []
 
-    # 📦 delivered update
+    # delivered update
     if delivered_seq is not None:
         values["last_delivered_seq"] = func.greatest(
             ChatMember.last_delivered_seq,
@@ -191,12 +205,23 @@ async def handle_state_update(
 
     idx = 0
 
+    updated_delivered = None
+
     if delivered_seq is not None:
-        payload["delivered_seq"] = row[idx]
+        updated_delivered = row[idx]
+        payload["delivered_seq"] = updated_delivered
         idx += 1
 
     if read_seq is not None:
         payload["read_seq"] = row[idx]
+
+    # ACK → очищаем pending
+    if updated_delivered is not None:
+        await redis.zremrangebyscore(
+            f"pending:{user_id}",
+            0,
+            updated_delivered
+        )
 
     await redis.publish(
         f"chat:{chat_id}",
@@ -271,5 +296,43 @@ async def websocket_handler(
 
     finally:
         await disconnect(ws, user_id)
+
+
+async def retry_pending_worker(redis):
+    while True:
+        try:
+            keys = await redis.keys("pending:*")
+            now = time.time()
+
+            for key in keys:
+                user_id = uuid.UUID(key.split(":")[1])
+
+                messages = await redis.zrange(key, 0, -1)
+
+                for raw in messages:
+                    payload = json.loads(raw)
+
+                    retry_at = payload.get("retry_at", 0)
+
+                    if retry_at > now:
+                        continue
+
+                    # ⏱ обновляем retry время
+                    payload["retry_at"] = now + 5
+
+                    # 🔁 resend
+                    await broadcast_to_user(user_id, payload)
+
+                    # обновляем payload в Redis
+                    await redis.zadd(
+                        key,
+                        {json.dumps(payload): payload["seq"]}
+                    )
+
+            await asyncio.sleep(2)
+
+        except Exception as e:
+            print("Retry error:", e)
+            await asyncio.sleep(5)
 
 
