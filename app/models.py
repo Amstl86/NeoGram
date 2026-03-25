@@ -1,5 +1,5 @@
 import uuid
-from sqlalchemy import String, DateTime, Index, Integer, UniqueConstraint
+from sqlalchemy import String, DateTime, Index, Integer, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 from datetime import datetime, timezone
@@ -124,6 +124,8 @@ class Message(Base):
 
     __table_args__ = (
         Index("ix_messages_chat_seq", "chat_id", "seq"),
+        UniqueConstraint("chat_id", "seq"),  # защита порядка
+        UniqueConstraint("chat_id", "sender_id", "client_id"),  # дедуп
     )
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -134,19 +136,59 @@ class Message(Base):
 
     chat_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("chats.id")
+        ForeignKey("chats.id"),
+        index=True
     )
 
-    user_id: Mapped[uuid.UUID] = mapped_column(
+    sender_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("users.id")
+        ForeignKey("users.id"),
+        index=True
     )
 
     seq: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    # ключ для offline dedup
+    client_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        nullable=True
+    )
 
     content: Mapped[str] = mapped_column(String)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
-        default=datetime.now(timezone.utc)
+        server_default=func.now()
+    )
+
+class ChatState(Base):
+    __tablename__ = "chat_states"
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "chat_id"),  # 🔥 один state на пользователя в чате
+        Index("ix_chat_states_user_chat", "user_id", "chat_id"),
+    )
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id"),
+        primary_key=True
+    )
+
+    chat_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("chats.id"),
+        primary_key=True
+    )
+
+    # 🔥 до какого seq доставлено
+    last_delivered_seq: Mapped[int] = mapped_column(
+        default=0,
+        nullable=False
+    )
+
+    # 🔥 до какого seq прочитано
+    last_read_seq: Mapped[int] = mapped_column(
+        default=0,
+        nullable=False
     )
