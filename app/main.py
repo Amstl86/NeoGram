@@ -10,6 +10,7 @@ from app.ws.redis_listener import redis_listener
 from app.workers.retry_worker import retry_pending_worker
 from app.core.redis import redis_client
 from app.database import AsyncSessionLocal
+from app.api.sync import router as sync_router
 
 
 @asynccontextmanager
@@ -41,6 +42,7 @@ app.include_router(auth.router)
 app.include_router(chats.router)
 app.include_router(ws.router)
 app.include_router(delivered.router)
+app.include_router(sync_router)
 
 
 @app.get("/")

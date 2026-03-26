@@ -50,4 +50,19 @@ async def handle_send_message(data, user_id: uuid.UUID, db: AsyncSession, redis)
         await redis.zadd(f"pending:{uid}", {json.dumps(payload): seq})
         await redis.expire(f"pending:{uid}", 86400)
 
+    # await redis.publish(f"chat:{chat_id}", json.dumps(payload))
+    # 🆕 сохраняем в history (для GAP recovery)
+    await redis.zadd(
+        f"chat:{chat_id}:history",
+        {json.dumps(payload): seq}
+    )
+
+    # 🆕 ограничиваем размер (например 1000 сообщений)
+    await redis.zremrangebyrank(
+        f"chat:{chat_id}:history",
+        0,
+        -1001
+    )
+
+    # pub/sub
     await redis.publish(f"chat:{chat_id}", json.dumps(payload))
