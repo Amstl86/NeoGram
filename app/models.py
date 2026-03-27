@@ -154,11 +154,75 @@ class Message(Base):
         nullable=True
     )
 
-    content: Mapped[str] = mapped_column(String)
+    content: Mapped[str | None] = mapped_column(String, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
         server_default=func.now()
+    )
+    attachments: Mapped[List["Attachment"]] = relationship(
+        back_populates="message",
+        cascade="all, delete-orphan"
+    )
+
+
+class Attachment(Base):
+    __tablename__ = "attachments"
+
+    __table_args__ = (
+        Index("ix_attachments_message_id", "message_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4
+    )
+
+    message_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("messages.id", ondelete="CASCADE"),
+        nullable=False
+    )
+
+    file_name: Mapped[str] = mapped_column(String, nullable=False)
+
+    file_type: Mapped[str] = mapped_column(
+        String,
+        nullable=False  # image / video / file
+    )
+
+    mime_type: Mapped[str] = mapped_column(String, nullable=False)
+
+    file_size: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0
+    )
+
+    # storage layer
+    storage: Mapped[str] = mapped_column(
+        String,
+        nullable=False  # local / s3
+    )
+
+    path: Mapped[str] = mapped_column(
+        String,
+        nullable=False
+    )
+
+    url: Mapped[str] = mapped_column(
+        String,
+        nullable=False
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=datetime.now(timezone.utc)
+    )
+
+    message: Mapped["Message"] = relationship(
+        back_populates="attachments"
     )
 
 class ChatState(Base):
